@@ -56,6 +56,8 @@ class Settings(BaseSettings):
     go_live_timeout_seconds: float = 5.0
     # Capture strategy for DWARF mini: "astro" (FITS/live-stacking flow) or "photo" (single JPG flow).
     dwarf_mini_capture_mode: str = "astro"
+    # Mini shooting mode for astro capture: 2 for 1080p full sensor FOV (default), 8 for 720p cropped ROI.
+    dwarf_mini_shooting_mode: int = 2
     # Direct PHOTO_RAW/PHOTOGRAPH does not currently prove long-exposure/gain/raw output.
     allow_unverified_direct_photo: bool = False
     capture_start_evidence_timeout_seconds: float = 3.0

@@ -38,3 +38,17 @@ firmware/*.zip
 # Keep model-specific DRACO reverse-engineering notes local until they are
 # intentionally reviewed and published.
 docs/apk-analysis/DRACO_LOCAL.md
+
+# Local astronomical captures and data
+captures/
+log/
+*.fits
+
+# Local test plans, backups and scratch scripts
+dwarf_schedules_backup.json
+plan_*.json
+sched*.json
+sequence.json
+scratch_*.py
+*.code-workspace
+

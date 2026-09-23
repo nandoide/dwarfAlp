@@ -230,8 +230,8 @@ async def test_first_slew_matches_app_one_click_goto_payload() -> None:
     assert request.target_name == "M42"
     assert request.lon == pytest.approx(11.5756)
     assert request.lat == pytest.approx(48.1372)
-    assert request.shooting_mode == 2
-    assert request.goto_only is False
+    assert request.shooting_mode == 8
+    assert request.goto_only is True
     assert request.HasField("rotation") is False
 
 

@@ -1033,7 +1033,11 @@ class DwarfSession:
         if self.simulation or not self._uses_v3_protocol():
             return
 
-        mode_switch = ReqSwitchShootingMode(mode=8)
+        if self.profile.model_id == "dwarfmini":
+            target_mode = int(getattr(self.settings, "dwarf_mini_shooting_mode", 2))
+        else:
+            target_mode = 8
+        mode_switch = ReqSwitchShootingMode(mode=target_mode)
         mode_response = await self._send_request(
             _MODULE_DEVICE_CONFIG,
             _CMD_TASK_SWITCH_SHOOTING_MODE,
@@ -1043,7 +1047,7 @@ class DwarfSession:
         )
         mode_code = int(getattr(mode_response, "code", protocol_pb2.OK))
         mode = int(getattr(mode_response, "shooting_mode_id", 0))
-        if mode_code != protocol_pb2.OK or mode != 8:
+        if mode_code != protocol_pb2.OK or mode != target_mode:
             raise CaptureConfigurationError(
                 f"{self.profile.display_name} did not select astronomy mode "
                 f"(code {mode_code}, mode {mode})"
@@ -1779,8 +1783,6 @@ class DwarfSession:
         )
         if state in (_AstroState.RUNNING, _AstroState.PLATE_SOLVING, _AstroState.STOPPING):
             self._goto_waiting_for_tracking = True
-        elif state == _AstroState.IDLE and self._goto_waiting_for_tracking:
-            self._resolve_goto("failed", reason="goto_idle", keep_record=False)
 
     def _handle_one_click_goto_state_notification(self, packet: Message) -> None:
         raw_data = getattr(packet, "data", b"") or b""
@@ -1882,14 +1884,6 @@ class DwarfSession:
             if target_name:
                 reason = f"tracking_running:{target_name}"
             self._resolve_goto("success", reason=reason, keep_record=True)
-        elif (
-            state in (_OperationState.STOPPED, _OperationState.IDLE)
-            and self._goto_waiting_for_tracking
-        ):
-            reason = "tracking_not_running"
-            if target_name:
-                reason = f"tracking_not_running:{target_name}"
-            self._resolve_goto("failed", reason=reason, keep_record=False)
 
     def _ensure_temperature_monitor_task(self) -> None:
         task = self._temperature_task
@@ -2794,6 +2788,11 @@ class DwarfSession:
             self._last_goto_time = time.time()
         else:
             self._drop_goto_record()
+        if self._ws_client is not None:
+            self._ws_client.cancel_pending(
+                protocol_pb2.ModuleId.MODULE_ASTRO,
+                protocol_pb2.DwarfCMD.CMD_ASTRO_START_GOTO_DSO,
+            )
         self._goto_completion_event.set()
         logger.info(
             "dwarf.telescope.goto.resolved",
@@ -2974,7 +2973,8 @@ class DwarfSession:
     async def _prepare_one_click_goto_mode(self) -> None:
         """Mirror the app's V3 mode/camera setup immediately before command 11013."""
 
-        mode_switch = ReqSwitchShootingMode(mode=8)
+        target_mode = 8
+        mode_switch = ReqSwitchShootingMode(mode=target_mode)
         response = await self._send_request(
             _MODULE_DEVICE_CONFIG,
             _CMD_TASK_SWITCH_SHOOTING_MODE,
@@ -2984,7 +2984,7 @@ class DwarfSession:
         )
         code = int(getattr(response, "code", protocol_pb2.OK))
         mode = int(getattr(response, "shooting_mode_id", 0))
-        if code != protocol_pb2.OK or mode != 8:
+        if code != protocol_pb2.OK or mode != target_mode:
             raise CaptureConfigurationError(
                 f"{self.profile.display_name} did not select astronomy mode "
                 f"(code {code}, mode {mode})"
@@ -3169,8 +3169,8 @@ class DwarfSession:
             target_name=target_name,
             lon=longitude,
             lat=latitude,
-            shooting_mode=2,
-            goto_only=False,
+            shooting_mode=8,
+            goto_only=True,
         )
         self._calibration_status = "starting with target"
         self._calibration_detail = f"Calibrating before GoTo {target_name}"
@@ -3186,8 +3186,8 @@ class DwarfSession:
             target_name=target_name,
             longitude=longitude,
             latitude=latitude,
-            shooting_mode=2,
-            goto_only=False,
+            shooting_mode=8,
+            goto_only=True,
         )
         try:
             response_future = await self._begin_request(
@@ -5099,9 +5099,20 @@ class DwarfSession:
                 frames,
             )
             if live_parameters_applied:
-                await self._apply_v3_astro_exposure_gain(
-                    self.camera_state.duration, int(requested_gain)
-                )
+                try:
+                    await self._apply_v3_astro_exposure_gain(
+                        self.camera_state.duration, int(requested_gain)
+                    )
+                except DwarfCommandError as exc:
+                    if exc.code != -1:
+                        raise
+                    logger.warning(
+                        "dwarf.camera.v3_reapply_exposure_gain_unsupported",
+                        model=self.profile.model_id,
+                        command_id=exc.command_id,
+                        code=exc.code,
+                        fallback="quick_set_11041",
+                    )
                 try:
                     await self._set_v3_astro_frame_count(frames)
                 except DwarfCommandError as exc:
@@ -6423,8 +6434,12 @@ class DwarfSession:
                             trigger = "stacking_progress"
                             break
                         if ftp_task in done and ftp_task.result():
-                            trigger = "ftp"
-                            break
+                            if state.requested_frame_count <= 1:
+                                trigger = "ftp"
+                                break
+                            # In multi-frame live stacking, do not abort the sequence
+                            # when the first frame arrives; let the firmware finish.
+                            trigger = "waiting_frames"
                         # FTP timeout is not capture completion. Firmware may
                         # still be exposing/stacking and will notify us later.
                         trigger = "waiting_after_ftp_timeout"
@@ -6437,7 +6452,8 @@ class DwarfSession:
                         stacked_count=state.progress_stacked_count,
                         retrieved_file=state.retrieved_file_path,
                     )
-                    await self._stop_astro_capture()
+                    if state.requested_frame_count <= 1 or (state.progress_current_count or 0) >= state.requested_frame_count or trigger == "capture_timeout":
+                        await self._stop_astro_capture()
                     ftp_success = await ftp_task
                 finally:
                     if not progress_task.done():
