@@ -270,6 +270,58 @@ async def export_schedules(ip: str, output_path: str):
         await session._ws_client.close()
 
 
+async def delete_schedule(ip: str, target: str):
+    """Elimina un plan del DWARF Mini por ID o por nombre utilizando el comando 16108."""
+    print(f"\n📡 Conectando al DWARF Mini en {ip} para eliminar plan...")
+    session = await get_dwarf_session(ip)
+    try:
+        schedules = await fetch_all_schedules(session)
+        target_sched = None
+
+        # Intentar coincidencia por ID exacto
+        for s in schedules:
+            if s.schedule_id == target:
+                target_sched = s
+                break
+
+        # Si no, buscar por nombre exacto o parcial
+        if not target_sched:
+            for s in schedules:
+                if s.schedule_name.lower() == target.lower():
+                    target_sched = s
+                    break
+
+        # Si es un número (índice 1-based del listado)
+        if not target_sched and target.isdigit():
+            idx = int(target) - 1
+            if 0 <= idx < len(schedules):
+                target_sched = schedules[idx]
+
+        if not target_sched:
+            print(f"❌ No se encontró ningún plan con identificador, nombre o índice '{target}'.")
+            return
+
+        sched_id = target_sched.schedule_id
+        sched_name = target_sched.schedule_name
+        print(f"🗑️ Eliminando plan '{sched_name}' (ID: {sched_id})...")
+
+        req = shooting_schedule_pb2.ReqDeleteShootingSchedule(id=sched_id, password="")
+        resp = await session._send_request(
+            protocol_pb2.ModuleId.MODULE_SHOOTING_SCHEDULE,
+            16108,
+            req,
+            shooting_schedule_pb2.ResDeleteShootingSchedule,
+            timeout=8.0,
+        )
+
+        if resp.code == 0:
+            print(f"✅ ¡Plan '{sched_name}' ({sched_id}) eliminado con éxito del telescopio!")
+        else:
+            print(f"❌ Error al eliminar plan (código {resp.code}).")
+    finally:
+        await session._ws_client.close()
+
+
 async def sync_plan(ip: str, plan_file: str):
     """Inyecta un plan desde archivo JSON en el DWARF Mini y verifica su guardado."""
     print(f"\n📖 Leyendo archivo de planificación: {plan_file}...")
@@ -489,12 +541,15 @@ def main():
     parser.add_argument("--ip", default="192.168.1.104", help="IP del DWARF Mini (por defecto 192.168.1.104)")
     parser.add_argument("--list", action="store_true", help="Listar todos los planes guardados en el telescopio")
     parser.add_argument("--export", metavar="OUTPUT_JSON", help="Exportar todos los planes del telescopio a un archivo JSON")
+    parser.add_argument("--delete", metavar="PLAN_NAME_OR_ID", help="Eliminar un plan del telescopio por nombre, ID o número de índice")
     args = parser.parse_args()
 
     if args.list:
         asyncio.run(list_schedules(args.ip))
     elif args.export:
         asyncio.run(export_schedules(args.ip, args.export))
+    elif args.delete:
+        asyncio.run(delete_schedule(args.ip, args.delete))
     elif args.file:
         asyncio.run(sync_plan(args.ip, args.file))
     else:
