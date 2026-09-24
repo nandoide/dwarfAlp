@@ -163,7 +163,10 @@ async def list_schedules(ip: str):
                     exp_s = p.get("shutterName", "?")
                     gain = p.get("gainName", "?")
                     mosaic_info = ""
-                    if p.get("isMosaicMode"):
+                    is_wide = bool(p.get("cameraType") == 1 or p.get("camera_type") == 1 or p.get("cam_id") == 1 or p.get("cameraId") == 1)
+                    if is_wide:
+                        mosaic_info = " | [WIDE-ANGLE]"
+                    elif p.get("isMosaicMode"):
                         h_sc = p.get("horizontalScale", 100)
                         v_sc = p.get("verticalScale", 100)
                         mosaic_info = f" | [MOSAICO {h_sc}%x{v_sc}%]"
@@ -417,11 +420,19 @@ async def sync_plan(ip: str, plan_file: str):
                 h_scale = max(100, min(180, h_scale))
                 v_scale = max(100, min(180, v_scale))
 
+                is_wide = bool(t.get("is_wide", False) or t.get("camera_type") == 1 or t.get("cam_id") == 1 or t.get("camera_id") == 1)
                 exp_sec = int(t.get("exp", 15))
                 shutter_idx = SHUTTER_MAP.get(exp_sec, 159)
                 gain = int(t.get("gain", 60))
                 filt_str = t.get("filter", "Astro")
-                filt_idx = 2 if filt_str.lower() in ("duo-band", "duoband") else 1
+                if is_wide:
+                    filt_idx = 0
+                    filt_name = "None"
+                    camera_val = 1
+                else:
+                    filt_idx = 2 if filt_str.lower() in ("duo-band", "duoband") else 1
+                    filt_name = "Duo-Band" if filt_idx == 2 else "Astro"
+                    camera_val = 0
 
                 ra_val = parse_ra(t.get("ra", 0.0))
                 dec_val = parse_dec(t.get("dec", 0.0))
@@ -437,7 +448,7 @@ async def sync_plan(ip: str, plan_file: str):
                     "gainIndex": gain,
                     "gainName": str(gain),
                     "filterModeIndex": filt_idx,
-                    "filterModeName": "Duo-Band" if filt_idx == 2 else "Astro",
+                    "filterModeName": filt_name,
                     "isMosaicMode": is_mosaic,
                     "horizontalScale": h_scale,
                     "verticalScale": v_scale,
@@ -447,6 +458,12 @@ async def sync_plan(ip: str, plan_file: str):
                     "atlasSortTypeValue": 0,
                     "cometQueryName": "",
                     "wellknownName": "",
+                    "cameraType": camera_val,
+                    "camera_type": camera_val,
+                    "cameraId": camera_val,
+                    "camera_id": camera_val,
+                    "camId": camera_val,
+                    "cam_id": camera_val,
                 })
 
             # Construir mensaje de Schedule
