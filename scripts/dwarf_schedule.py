@@ -64,28 +64,34 @@ def format_dec(dec_degrees: float) -> str:
 
 
 def parse_ra(ra_val: Any) -> float:
-    """Convierte 'HH:MM:SS' o número flotante a horas decimales."""
+    """Convierte 'HH:MM:SS', 'HHh MMm SSs' o número flotante a horas decimales."""
     if isinstance(ra_val, (int, float)):
         return float(ra_val)
-    parts = [float(p) for p in str(ra_val).strip().split(":")]
-    h = parts[0]
-    m = parts[1] if len(parts) > 1 else 0.0
-    s = parts[2] if len(parts) > 2 else 0.0
-    return h + m / 60.0 + s / 3600.0
+    raw = str(ra_val).strip()
+    import re
+    nums = re.findall(r"[-+]?\d*\.?\d+", raw)
+    if nums:
+        h = float(nums[0])
+        m = float(nums[1]) if len(nums) > 1 else 0.0
+        s = float(nums[2]) if len(nums) > 2 else 0.0
+        return h + m / 60.0 + s / 3600.0
+    return 0.0
 
 
 def parse_dec(dec_val: Any) -> float:
-    """Convierte '+/-DD:MM:SS' o número flotante a grados decimales."""
+    """Convierte '+/-DD:MM:SS', '+DD° MM′ SS″' o número flotante a grados decimales."""
     if isinstance(dec_val, (int, float)):
         return float(dec_val)
     raw = str(dec_val).strip()
     sign = -1.0 if raw.startswith("-") else 1.0
-    cleaned = raw.lstrip("+-")
-    parts = [float(p) for p in cleaned.split(":")]
-    d = parts[0]
-    m = parts[1] if len(parts) > 1 else 0.0
-    s = parts[2] if len(parts) > 2 else 0.0
-    return sign * (d + m / 60.0 + s / 3600.0)
+    import re
+    nums = re.findall(r"\d*\.?\d+", raw)
+    if nums:
+        d = float(nums[0])
+        m = float(nums[1]) if len(nums) > 1 else 0.0
+        s = float(nums[2]) if len(nums) > 2 else 0.0
+        return sign * (d + m / 60.0 + s / 3600.0)
+    return 0.0
 
 
 def state_label(state_code: int) -> str:
@@ -434,8 +440,8 @@ async def sync_plan(ip: str, plan_file: str):
                     filt_name = "Duo-Band" if filt_idx == 2 else "Astro"
                     camera_val = 0
 
-                ra_val = parse_ra(t.get("ra", 0.0))
-                dec_val = parse_dec(t.get("dec", 0.0))
+                ra_val = float(t["ra_hours"]) if "ra_hours" in t else parse_ra(t.get("ra", 0.0))
+                dec_val = float(t["dec_degrees"]) if "dec_degrees" in t else parse_dec(t.get("dec", 0.0))
 
                 parsed_tasks.append({
                     "name": t.get("name") or t.get("target") or "Objetivo",
